@@ -7,6 +7,8 @@ from flask_sqlalchemy import SQLAlchemy
 
 def get_index(list, index, default=None):
     try:
+        if list == {}:
+            return default
         return list[index]
     except IndexError:
         return default
@@ -52,30 +54,41 @@ def harvest():
     idx = request.form['index']
     # date = request.form['date']
     # author = request.form['author']
-    api_url = f"https://www.googleapis.com/customsearch/v1?key={key}&cx={id}&q={keywords}"
-    data = requests.get(api_url).json()
 
-    if isinstance(data.get('error'), dict):
-        error = data.get('error', {}).get('message')
-        return render_template('index.html', error=error)
+    hasNextPage = True
+    currentResults = 10
+    page = 10
 
-    else:
-        for search_item in data.get("items", {}):
-            url = search_item.get('link')
-            title = search_item.get("title")
-            shortDesc = search_item.get('snippet')
-            date = get_index(search_item.get('pagemap', {}).get('metatags', {}), 0, {}).get('article:published_time')
-            author = get_index(search_item.get('pagemap', {}).get('metatags', {}), 0, {}).get('article:publisher')
-            response = requests.get(url)
-            if response.status_code == 200:
-                full_text = cleanhtml(Document(response.text).summary())
-            else:
-                full_text = ""
-            results = SearchResults(url=url, title=title, short_desc=shortDesc,
-                                    full_text=full_text, date=date, author=author, keywords='')
-            db.session.add(results)
-            db.session.commit()
-        return redirect(url_for('results'))
+    while (hasNextPage):
+        api_url = f"https://www.googleapis.com/customsearch/v1?key={key}&cx={id}&q={keywords}&start={page}"
+        data = requests.get(api_url).json()
+
+        if isinstance(data.get('error'), dict):
+            error = data.get('error', {}).get('message')
+            return render_template('index.html', error=error)
+
+        else:
+            totalResults = int(get_index(data.get('queries', {}).get('nextPage'), 0).get('totalResults'))
+            for search_item in data.get("items", {}):
+                url = search_item.get('link')
+                title = search_item.get("title")
+                shortDesc = search_item.get('snippet')
+                date = get_index(search_item.get('pagemap', {}).get('metatags', {}), 0, {}).get('article:published_time')
+                author = get_index(search_item.get('pagemap', {}).get('metatags', {}), 0, {}).get('article:publisher')
+                response = requests.get(url)
+                if response.status_code == 200:
+                    full_text = cleanhtml(Document(response.text).summary())
+                else:
+                    full_text = ""
+                results = SearchResults(url=url, title=title, short_desc=shortDesc,
+                                        full_text=full_text, date=date, author=author, keywords='')
+                db.session.add(results)
+                db.session.commit()
+            currentResults += len(data.get("items", {}))
+            page += 10
+            if currentResults > totalResults or page > 100:
+                hasNextPage = False
+    return redirect(url_for('results'))
 
 
 @app.route('/results')
